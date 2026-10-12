@@ -1,10 +1,10 @@
-
-name: Build KasKu APK
+name: Build Kasku APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -12,34 +12,73 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Extract project ZIP
+        shell: bash
         run: |
-          ZIP=$(find . -maxdepth 2 -name '*.zip' | head -n 1)
-          if [ -n "$ZIP" ]; then unzip -o "$ZIP" -d extracted; fi
-          if [ -d extracted ]; then
-            find extracted -name settings.gradle.kts -print -quit
-          fi
+          set -e
 
-      - name: Build APK
-        run: |
-          if [ -f settings.gradle.kts ]; then
-            gradle assembleDebug
-          else
-            echo "Project ZIP belum berada pada struktur folder yang benar."
+          ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" \
+            -not -path "./.git/*" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: File ZIP proyek tidak ditemukan."
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
+          mkdir -p extracted
+          unzip -o "$ZIP" -d extracted
+
+          PROJECT_DIR=$(find extracted -type f \
+            -name "settings.gradle.kts" \
+            -print -quit | xargs -r dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            PROJECT_DIR=$(find extracted -type f \
+              -name "settings.gradle" \
+              -print -quit | xargs -r dirname)
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: File settings.gradle(.kts) tidak ditemukan."
+            find extracted -maxdepth 4 -type f
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Proyek ditemukan di: $PROJECT_DIR"
+
+      - name: Build APK
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            gradle assembleDebug
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          name: KasKu-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: Kasku-APK
+          path: |
+            extracted/**/build/outputs/apk/debug/*.apk
+            extracted/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
